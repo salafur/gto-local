@@ -16,13 +16,85 @@
 | **Equity 计算器** | 手牌 vs 范围蒙特卡洛胜率 |
 | **Kuhn 验证器** | 用解析纳什均衡证明 CFR 引擎正确性 |
 
-## 快速开始
+## 快速开始（详细教程 · 小白向）
+
+只需要 **Python 3.10+** 和一台能上网的电脑（Windows / Mac / Linux 都行），全部操作约 5 分钟。求解完全在本地 CPU 运行，不需要显卡，装完后离线也能用。
+
+### 第 1 步：安装 Python
+
+- **Windows**：打开 https://www.python.org/downloads/ 下载最新版安装包。安装时**务必勾选最下方的 `Add python.exe to PATH`**（不勾选后面会报"python 不是命令"），然后点 Install Now。
+- **Mac**：`brew install python@3.13`，或用官网安装包。
+- 装完后打开终端（Windows 按 `Win+R` 输入 `cmd` 回车），输入下面命令能看到版本号（≥3.10）就 OK：
+
+```bash
+python --version
+```
+
+> Windows 上如果提示"不是内部或外部命令"：关掉终端重开一个试试；还不行就用 `py --version`，后面所有命令里的 `python` 都换成 `py`。
+
+### 第 2 步：下载本项目代码
+
+两种方式任选其一：
+
+**方式 A（推荐，装了 git）**：
+
+```bash
+git clone https://github.com/salafur/gto-local.git
+cd gto-local
+```
+
+**方式 B（不用 git）**：浏览器打开 https://github.com/salafur/gto-local → 点绿色 **Code** 按钮 → **Download ZIP** → 解压到任意目录 → 在终端里 `cd` 进解压后的文件夹（如 `cd C:\Users\你的用户名\Downloads\gto-local-main`）。
+
+### 第 3 步：创建虚拟环境并安装依赖
+
+在项目目录里执行（逐行复制）：
+
+```bash
+python -m venv .venv
+```
+
+然后**激活虚拟环境**（每次使用前都要激活一次）：
+
+| 系统 | 命令 |
+|---|---|
+| Windows (cmd) | `.venv\Scripts\activate.bat` |
+| Windows (PowerShell) | `.venv\Scripts\Activate.ps1` |
+| Mac / Linux | `source .venv/bin/activate` |
+
+激活后命令行前面会出现 `(.venv)` 字样。接着安装依赖：
 
 ```bash
 pip install -r requirements.txt
-python -m web.server
-# 浏览器打开 http://127.0.0.1:8000
 ```
+
+> 国内网络慢的话用清华镜像加速：
+> ```bash
+> pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+> ```
+
+> PowerShell 激活脚本报红字"禁止运行脚本"时，先执行一次：
+> `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`，再重新激活。
+
+### 第 4 步：启动并打开界面
+
+```bash
+python -m web.server
+```
+
+看到 `GTO Local 已启动: http://127.0.0.1:8000` 后，**用浏览器（Chrome/Edge）打开 http://127.0.0.1:8000** 即可使用。终端窗口不要关，关了服务就停了；停止服务按 `Ctrl+C`。
+
+### 常见问题（FAQ）
+
+| 问题 | 解决办法 |
+|---|---|
+| 打开网页提示无法访问 | 确认终端里服务还在运行；地址必须是 `http://127.0.0.1:8000` |
+| 启动报错"端口被占用"（10048） | 换端口启动：`python -m web.server --port 8001`，然后浏览器访问对应端口 |
+| 求解要等多久？ | 河牌 20 万迭代约 2-10 秒，转牌约 10-30 秒，翻牌 100 万+迭代约 1-3 分钟（纯 CPU，迭代期间可以切出去玩别的） |
+| Nash 表第一次点"计算"很慢 | 首次要构建 169×169 胜率矩阵（约 40 秒），之后永久缓存，秒出 |
+| 求解/安装需要联网吗？ | 只有 `pip install` 那一步需要联网，之后完全离线可用 |
+| 杀毒软件/防火墙弹窗 | 是本地 Python 进程，允许即可；本工具不联网、不收集任何数据 |
+
+### 开发者
 
 跑测试（79 个）：
 

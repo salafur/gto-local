@@ -257,12 +257,17 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 def main():
+    import argparse
     import uvicorn
+    parser = argparse.ArgumentParser(description="GTO Local 本地服务器")
+    parser.add_argument("--port", type=int, default=8000, help="监听端口（默认 8000）")
+    parser.add_argument("--host", default="127.0.0.1", help="监听地址（默认 127.0.0.1）")
+    args = parser.parse_args()
     print("=" * 50)
-    print("  GTO Local v2 已启动:  http://127.0.0.1:8000")
+    print(f"  GTO Local 已启动:  http://127.0.0.1:{args.port}")
     print("  按 Ctrl+C 停止")
     print("=" * 50)
-    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="warning")
+    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
 
 
 if __name__ == "__main__":
