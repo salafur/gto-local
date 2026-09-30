@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GTO Local · 本地德州扑克求解器</title>
+<style>
+  :root {
+    --bg: #0f1419; --panel: #1a2230; --panel2: #232e42; --border: #2e3d58;
+    --text: #dbe4f0; --dim: #8fa1bd; --accent: #4f9cff;
+    --check: #43a047; --bet: #e53935; --raise: #fb8c00; --call: #1e88e5; --fold: #616161;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: "Segoe UI", "Microsoft YaHei", sans-serif; padding: 20px; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .sub { color: var(--dim); font-size: 13px; margin-bottom: 18px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tabs button { background: var(--panel); color: var(--dim); border: 1px solid var(--border); padding: 8px 18px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+  .tabs button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+  label { display: block; font-size: 12px; color: var(--dim); margin-bottom: 4px; }
+  input, select { background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: 5px; padding: 7px 10px; font-size: 14px; outline: none; }
+  input:focus { border-color: var(--accent); }
+  .field { display: flex; flex-direction: column; }
+  button.primary { background: var(--accent); color: #fff; border: none; padding: 9px 22px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+  button.primary:disabled { opacity: .5; cursor: not-allowed; }
+  button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); padding: 6px 12px; border-radius: 5px; cursor: pointer; font-size: 13px; }
+  .progress { height: 8px; background: var(--panel2); border-radius: 4px; overflow: hidden; margin-top: 10px; }
+  .progress > div { height: 100%; background: var(--accent); width: 0%; transition: width .3s; }
+  .stat { color: var(--dim); font-size: 13px; margin-top: 6px; }
+  /* 13x13 矩阵 */
+  .matrix { border-collapse: collapse; user-select: none; }
+  .matrix td { width: 46px; height: 34px; border: 1px solid #00000055; text-align: center; font-size: 11px; font-weight: 600; color: #fff; cursor: pointer; position: relative; }
+  .matrix td.empty { background: var(--panel2); color: var(--dim); font-weight: 400; }
+  .matrix td.selected { outline: 2px solid var(--accent); z-index: 2; }
+  .matrix td:hover { filter: brightness(1.25); }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--dim); margin: 10px 0; }
+  .legend span::before { content: "■"; margin-right: 4px; }
+  .detail { background: var(--panel2); border-radius: 6px; padding: 12px; margin-top: 12px; font-size: 13px; display: none; }
+  .bar-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+  .bar-row .name { width: 70px; }
+  .bar { flex: 1; height: 14px; border-radius: 3px; overflow: hidden; display: flex; }
+  .bar > div { height: 100%; }
+  .bar-labels { font-size: 11px; color: var(--dim); }
+  /* 弹窗 */
+  .modal-mask { position: fixed; inset: 0; background: #000a; display: none; align-items: center; justify-content: center; z-index: 10; }
+  .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
+  .modal .matrix td { width: 40px; height: 30px; }
+  .modal .matrix td.on { background: var(--accent) !important; color: #fff; }
+  .modal-actions { display: flex; gap: 8px; margin-top: 12px; }
+  .err { color: #ff7070; font-size: 13px; margin-top: 8px; }
+  .equity-num { font-size: 42px; font-weight: 700; color: var(--accent); }
+  .hint { font-size: 12px; color: var(--dim); margin-top: 4px; }
+</style>
+</head>
+<body>
+<h1>🂡 GTO Local</h1>
+<div class="sub">本地德州扑克 GTO 求解器 · MCCFR 实时求解 · 数据不出本机</div>
+
+<div class="tabs">
+  <button id="tab-solve" class="active" onclick="switchTab('solve')">河牌求解</button>
+  <button id="tab-equity" onclick="switchTab('equity')">Equity 计算</button>
+</div>
+
+<!-- ==================== 河牌求解 ==================== -->
+<div id="page-solve">
+  <div class="panel">
+    <div class="row">
+      <div class="field"><label>公共牌（5 张）</label><input id="board" value="AhKd7c3s2h" size="14"></div>
+      <div class="field"><label>底池</label><input id="pot" type="number" value="60" size="6"></div>
+      <div class="field"><label>有效筹码</label><input id="stack" type="number" value="140" size="6"></div>
+      <div class="field"><label>下注尺度(%,逗号分隔)</label><input id="bet_sizes" value="33,75,150" size="10"></div>
+      <div class="field"><label>迭代次数</label>
+        <select id="iterations">
+          <option value="50000">5 万（快速预览）</option>
+          <option value="200000" selected>20 万（推荐）</option>
+          <option value="500000">50 万（精细）</option>
+        </select>
+      </div>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <div class="field" style="flex:1">
+        <label>OOP 范围（不利位置，先行动）</label>
+        <input id="oop_range" value="22+,ATs+,KTs+,QTs+,JTs,T9s,98s,87s,AKo,AQo" style="width:100%">
+      </div>
+      <button class="ghost" onclick="openPicker('oop_range')">选择范围</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div class="field" style="flex:1">
+        <label>IP 范围（有利位置，后行动）</label>
+        <input id="ip_range" value="22+,A9s+,KTs+,QTs+,JTs,T9s,98s,AKo,AQo,AJo" style="width:100%">
+      </div>
+      <button class="ghost" onclick="openPicker('ip_range')">选择范围</button>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button class="primary" id="solve-btn" onclick="startSolve()">开始求解</button>
+      <span class="hint">CFR 迭代逼近纳什均衡，范围越大需要越多迭代</span>
+    </div>
+    <div class="progress" id="solve-progress" style="display:none"><div></div></div>
+    <div class="stat" id="solve-stat"></div>
+    <div class="err" id="solve-err"></div>
+  </div>
+
+  <div class="panel" id="result-panel" style="display:none">
+    <div class="row" style="align-items:center">
+      <div class="field"><label>决策节点</label><select id="node-select" onchange="renderMatrix()" style="min-width:280px"></select></div>
+      <span class="hint" id="node-info"></span>
+    </div>
+    <div class="legend">
+      <span style="color:var(--check)">过牌</span>
+      <span style="color:var(--bet)">下注</span>
+      <span style="color:var(--raise)">加注/全下</span>
+      <span style="color:var(--call)">跟注</span>
+      <span style="color:var(--fold)">弃牌</span>
+    </div>
+    <table class="matrix" id="strategy-matrix"></table>
+    <div class="detail" id="combo-detail"></div>
+  </div>
+</div>
+
+<!-- ==================== Equity ==================== -->
+<div id="page-equity" style="display:none">
+  <div class="panel">
+    <div class="row">
+      <div class="field"><label>我的手牌</label><input id="eq-hand" value="AhKh" size="8"></div>
+      <div class="field" style="flex:1"><label>对手范围</label><input id="eq-villain" value="random" style="width:100%"></div>
+      <button class="ghost" onclick="openPicker('eq-villain')">选择范围</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <div class="field"><label>公共牌（可留空）</label><input id="eq-board" value="" size="14" placeholder="如 Kd7c2s"></div>
+      <div class="field"><label>模拟次数</label>
+        <select id="eq-trials"><option value="10000">1 万</option><option value="20000" selected>2 万</option><option value="50000">5 万</option></select>
+      </div>
+      <button class="primary" onclick="calcEquity()">计算胜率</button>
+    </div>
+    <div class="err" id="eq-err"></div>
+  </div>
+  <div class="panel" id="eq-result" style="display:none">
+    <label>胜率（平局各半）</label>
+    <div class="equity-num" id="eq-num">--%</div>
+    <div class="bar" style="height:18px;margin-top:8px">
+      <div id="eq-bar-win" style="background:var(--check)"></div>
+      <div id="eq-bar-lose" style="background:var(--fold)"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 范围选择器 ==================== -->
+<div class="modal-mask" id="picker-mask">
+  <div class="modal">
+    <label>点击格子加入/移出范围（右上=同花，左下=不同花，对角=对子）</label>
+    <table class="matrix" id="picker-matrix" style="margin-top:10px"></table>
+    <div class="modal-actions">
+      <button class="ghost" onclick="pickerAll()">全选</button>
+      <button class="ghost" onclick="pickerClear()">清空</button>
+      <button class="primary" onclick="closePicker()">完成</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const RANKS = "AKQJT98765432";
+const SUITED = (i, j) => j > i;   // 右上三角为同花
+const cellText = (i, j) => {
+  if (i === j) return RANKS[i] + RANKS[j];
+  return SUITED(i, j) ? RANKS[i] + RANKS[j] + "s" : RANKS[j] + RANKS[i] + "o";
+};
+const ACTION_COLORS = a => {
+  if (a.startsWith("过牌")) return "var(--check)";
+  if (a.startsWith("下注")) return "var(--bet)";
+  if (a.startsWith("弃牌")) return "var(--fold)";
+  if (a.startsWith("跟注")) return "var(--call)";
+  return "var(--raise)";  // 加注/全下
+};
+
+function switchTab(name) {
+  document.getElementById("tab-solve").classList.toggle("active", name === "solve");
+  document.getElementById("tab-equity").classList.toggle("active", name === "equity");
+  document.getElementById("page-solve").style.display = name === "solve" ? "" : "none";
+  document.getElementById("page-equity").style.display = name === "equity" ? "" : "none";
+}
+
+/* ---------- 范围选择器 ---------- */
+let pickerTarget = null;
+function openPicker(inputId) {
+  pickerTarget = inputId;
+  document.getElementById("picker-mask").style.display = "flex";
+  buildPicker();
+}
+function closePicker() { document.getElementById("picker-mask").style.display = "none"; }
+function pickerTokens() {
+  return document.getElementById(pickerTarget).value.split(",").map(s => s.trim()).filter(Boolean);
+}
+function buildPicker() {
+  const tokens = new Set(pickerTokens());
+  const t = document.getElementById("picker-matrix");
+  t.innerHTML = "";
+  for (let i = 0; i < 13; i++) {
+    const tr = t.insertRow();
+    for (let j = 0; j < 13; j++) {
+      const td = tr.insertCell();
+      const key = cellText(i, j);
+      td.textContent = key;
+      td.className = tokens.has(key) ? "on" : "empty";
+      td.onclick = () => toggleCell(key, td);
+    }
+  }
+}
+function toggleCell(key, td) {
+  const input = document.getElementById(pickerTarget);
+  let tokens = pickerTokens();
+  if (tokens.includes(key)) {
+    tokens = tokens.filter(x => x !== key);
+    td.className = "empty";
+  } else {
+    tokens.push(key);
+    td.className = "on";
+  }
+  input.value = tokens.join(",");
+}
+function pickerAll() {
+  document.getElementById(pickerTarget).value = "random";
+  buildPicker();
+}
+function pickerClear() {
+  document.getElementById(pickerTarget).value = "";
+  buildPicker();
+}
+
+/* ---------- 河牌求解 ---------- */
+let solveResult = null;
+async function startSolve() {
+  const btn = document.getElementById("solve-btn");
+  const err = document.getElementById("solve-err");
+  err.textContent = "";
+  btn.disabled = true;
+  const body = {
+    board: document.getElementById("board").value,
+    pot: +document.getElementById("pot").value,
+    stack: +document.getElementById("stack").value,
+    oop_range: document.getElementById("oop_range").value,
+    ip_range: document.getElementById("ip_range").value,
+    bet_sizes: document.getElementById("bet_sizes").value,
+    iterations: +document.getElementById("iterations").value,
+  };
+  let jobId;
+  try {
+    const r = await fetch("/api/solve", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "提交失败");
+    jobId = d.job_id;
+  } catch (e) { err.textContent = e.message; btn.disabled = false; return; }
+
+  const prog = document.getElementById("solve-progress");
+  const stat = document.getElementById("solve-stat");
+  prog.style.display = "";
+  const timer = setInterval(async () => {
+    const r = await fetch("/api/job/" + jobId);
+    const d = await r.json();
+    prog.firstElementChild.style.width = (100 * d.progress / d.total) + "%";
+    stat.textContent = `迭代中 ${d.progress.toLocaleString()} / ${d.total.toLocaleString()} ...`;
+    if (d.status === "done") {
+      clearInterval(timer);
+      btn.disabled = false;
+      stat.textContent = `求解完成：${d.result.iterations.toLocaleString()} 次迭代，用时 ${d.elapsed}s，${Object.keys(d.result.nodes).length} 个决策节点`;
+      solveResult = d.result;
+      showResult();
+    } else if (d.status === "error") {
+      clearInterval(timer);
+      btn.disabled = false;
+      err.textContent = d.error;
+      prog.style.display = "none";
+    }
+  }, 400);
+}
+
+function sortedNodes(nodes) {
+  const entries = Object.entries(nodes);
+  return entries.sort((a, b) => {
+    const da = a[0] ? a[0].split(";").length : 0;
+    const db = b[0] ? b[0].split(";").length : 0;
+    return da - db || a[0].localeCompare(b[0]);
+  });
+}
+
+function showResult() {
+  document.getElementById("result-panel").style.display = "";
+  const sel = document.getElementById("node-select");
+  sel.innerHTML = "";
+  for (const [hist, node] of sortedNodes(solveResult.nodes)) {
+    const opt = document.createElement("option");
+    opt.value = hist;
+    opt.textContent = node.label;
+    sel.appendChild(opt);
+  }
+  renderMatrix();
+}
+
+/* combo "AhKd" -> 矩阵格子 key */
+function comboCellKey(combo) {
+  const r1 = RANKS.indexOf(combo[0]), r2 = RANKS.indexOf(combo[2]);
+  const suited = combo[1] === combo[3];
+  if (r1 === r2) return RANKS[r1] + RANKS[r2];
+  const hi = Math.min(r1, r2), lo = Math.max(r1, r2);
+  return RANKS[hi] + RANKS[lo] + (suited ? "s" : "o");
+}
+
+function renderMatrix() {
+  const hist = document.getElementById("node-select").value;
+  const node = solveResult.nodes[hist];
+  document.getElementById("node-info").textContent =
+    `${node.player_name} 行动 · ${Object.keys(node.combos).length} 个组合`;
+  document.getElementById("combo-detail").style.display = "none";
+
+  // 按格子聚合（组合数加权）
+  const cells = {};
+  for (const [combo, probs] of Object.entries(node.combos)) {
+    const key = comboCellKey(combo);
+    if (!cells[key]) cells[key] = {sum: new Array(probs.length).fill(0), n: 0, combos: {}};
+    probs.forEach((p, i) => cells[key].sum[i] += p);
+    cells[key].n++;
+    cells[key].combos[combo] = probs;
+  }
+
+  const t = document.getElementById("strategy-matrix");
+  t.innerHTML = "";
+  for (let i = 0; i < 13; i++) {
+    const tr = t.insertRow();
+    for (let j = 0; j < 13; j++) {
+      const td = tr.insertCell();
+      const key = cellText(i, j);
+      const cell = cells[key];
+      td.textContent = key;
+      if (!cell) { td.className = "empty"; continue; }
+      const avg = cell.sum.map(x => x / cell.n);
+      // 用渐变堆叠各动作占比
+      let acc = 0, stops = [];
+      avg.forEach((p, k) => {
+        if (p <= 0.005) return;
+        const c = ACTION_COLORS(node.actions[k]);
+        stops.push(`${c} ${acc * 100}% ${(acc + p) * 100}%`);
+        acc += p;
+      });
+      if (acc < 1) stops.push(`var(--panel2) ${acc * 100}% 100%`);
+      td.style.background = `linear-gradient(to right, ${stops.join(",")})`;
+      td.onclick = () => showCombos(key, cell, node.actions, td);
+    }
+  }
+}
+
+function showCombos(key, cell, actions, td) {
+  document.querySelectorAll("#strategy-matrix td.selected").forEach(x => x.classList.remove("selected"));
+  td.classList.add("selected");
+  const panel = document.getElementById("combo-detail");
+  panel.style.display = "";
+  let html = `<b>${key}</b>（${cell.n} 个组合）`;
+  for (const [combo, probs] of Object.entries(cell.combos)) {
+    html += `<div class="bar-row"><span class="name">${combo}</span><div class="bar">`;
+    probs.forEach((p, k) => {
+      if (p > 0.005) html += `<div style="width:${p * 100}%;background:${ACTION_COLORS(actions[k])}"></div>`;
+    });
+    html += `</div><span class="bar-labels">` +
+      probs.map((p, k) => p > 0.005 ? `${actions[k]} ${(p * 100).toFixed(0)}%` : "").filter(Boolean).join(" · ") +
+      `</span></div>`;
+  }
+  panel.innerHTML = html;
+}
+
+/* ---------- Equity ---------- */
+async function calcEquity() {
+  const err = document.getElementById("eq-err");
+  err.textContent = "";
+  const body = {
+    hand: document.getElementById("eq-hand").value,
+    villain: document.getElementById("eq-villain").value,
+    board: document.getElementById("eq-board").value,
+    trials: +document.getElementById("eq-trials").value,
+  };
+  try {
+    const r = await fetch("/api/equity", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "计算失败");
+    const pct = (d.equity * 100).toFixed(1);
+    document.getElementById("eq-result").style.display = "";
+    document.getElementById("eq-num").textContent = pct + "%";
+    document.getElementById("eq-bar-win").style.width = pct + "%";
+    document.getElementById("eq-bar-lose").style.width = (100 - pct) + "%";
+  } catch (e) { err.textContent = e.message; }
+}
+</script>
+</body>
+</html>
