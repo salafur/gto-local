@@ -47,18 +47,23 @@ def _offsuit_combos(r_hi: int, r_lo: int) -> Iterable[Combo]:
 
 
 def _expand_ladder(r_hi: int, r_lo: int, suited: str):
-    """处理 "ATs+" / "76s+" / "KQo+" 的 + 扩展，返回 (hi, lo) 列表。"""
-    pairs = []
-    if r_hi == 12:  # A 开头：提升第二张牌，直到 K
-        for lo in range(r_lo, 12):
-            pairs.append((12, lo))
-    else:  # 保持间隔整体提升，最高到 KQ（如 76s+ -> 76s..KQs，AK 单独成类）
+    """处理 "ATs+" / "76s+" / "KQo+" 的 + 扩展，返回 (hi, lo) 列表。
+
+    遵循 PokerStove/Equilab 标准语义：
+    - 连张（如 76s、T9s、KQo）：整体提升，直到高牌为 K（76s+ -> 76s..KQs）
+    - 非连张（如 ATs、K7s、96s）：高牌固定，低牌提升到高牌-1
+      （ATs+ -> ATs,AJs,AQs,AKs；K7s+ -> K7s..KQs；96s+ -> 96s,97s,98s）
+    """
+    if r_hi - r_lo == 1 and r_hi != 12:  # 连张：整体提升
+        pairs = []
         hi, lo = r_hi, r_lo
         while hi <= 11:
             pairs.append((hi, lo))
             hi += 1
             lo += 1
-    return pairs
+        return pairs
+    # 非连张：高牌固定，低牌提升（A 开头时低牌升到 K）
+    return [(r_hi, lo) for lo in range(r_lo, r_hi)]
 
 
 def _expand_token(token: str) -> Iterable[Tuple[Combo, float]]:
@@ -119,16 +124,29 @@ def _expand_token(token: str) -> Iterable[Tuple[Combo, float]]:
 
 
 def parse_range(text: str) -> WeightedRange:
-    """解析范围字符串为 {组合: 权重}，同组合取最大权重（并集语义）。"""
+    """解析范围字符串为 {组合: 权重}，同组合取最大权重（并集语义）。
+
+    支持减法语法：以 "-" 开头的条目表示从范围中移除，如
+    "random,-TT+,-AKs" = 全部手牌去掉 TT 以上对子和 AKs。
+    减法条目在所有加法条目之后统一应用。
+    """
     result: WeightedRange = {}
+    removals = []
     for token in text.split(","):
-        if not token.strip():
+        token = token.strip()
+        if not token:
+            continue
+        if token.startswith("-"):
+            removals.append(token[1:])
             continue
         for combo, w in _expand_token(token):
             if combo in result:
                 result[combo] = max(result[combo], w)
             else:
                 result[combo] = w
+    for token in removals:
+        for combo, _ in _expand_token(token):
+            result.pop(combo, None)
     if not result:
         raise ValueError(f"范围为空或无法解析: {text!r}")
     return result

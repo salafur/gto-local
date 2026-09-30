@@ -65,3 +65,21 @@ class TestFilterBlocked:
         r = parse_range("AhKh")
         board = parse_cards("AhKd7c3s2h")
         assert filter_blocked(r, board) == {}
+
+
+def test_subtraction_syntax():
+    # 减法语法：random 去掉 AA 和 KK
+    r = parse_range("random,-AA,-KK")
+    assert len(r) == 1326 - 12
+    from gto.cards import parse_combo
+    assert parse_combo("AhAc") not in r
+    assert parse_combo("KsKd") not in r
+    assert parse_combo("QhQc") in r
+
+
+def test_subtraction_after_weighted():
+    # 减法在加权并集之后应用
+    r = parse_range("AA:0.5,KK,-AA")
+    from gto.cards import parse_combo
+    assert parse_combo("AhAc") not in r
+    assert r[parse_combo("KhKc")] == 1.0

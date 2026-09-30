@@ -57,3 +57,14 @@ class TestSevenCard:
     def test_five_card_shortcut(self):
         cards = parse_cards("AcKcQcJcTc")
         assert evaluate7(cards) == evaluate5(cards)
+
+
+def test_evaluate7_fast_matches_brute():
+    """快速 7 牌评估器必须与暴力枚举结果完全一致。"""
+    import random
+    from gto.evaluator import evaluate7, evaluate7_brute
+    rng = random.Random(12345)
+    for _ in range(3000):
+        cards = tuple(rng.sample(range(52), 7))
+        a, b = evaluate7(cards), evaluate7_brute(cards)
+        assert a == b, f"{cards}: fast={a} brute={b}"
