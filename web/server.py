@@ -35,7 +35,7 @@ from gto.ranges import filter_blocked, parse_range
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
-app = FastAPI(title="GTO Local", version="2.0.0")
+app = FastAPI(title="GTO Local", version="2.1.0")
 
 JOBS: dict = {}
 
@@ -67,6 +67,7 @@ class SolveRequest(BaseModel):
 
 class PreflopConfigModel(BaseModel):
     game_type: str = "cash"
+    table_size: int = 2          # 2 | 6 | 9（翻后仍只解 HU）
     stack_bb: float = 100.0
     sb: float = 0.5
     bb: float = 1.0
@@ -76,7 +77,8 @@ class PreflopConfigModel(BaseModel):
 class PreflopRequest(BaseModel):
     config: PreflopConfigModel = PreflopConfigModel()
     line: list = Field(default_factory=list,
-                       description='行动线，如 [["SB","raise",2.5],["BB","call"]]')
+                       description='行动线，如 [["SB","raise",2.5],["BB","call"]] 或 '
+                                   '[["UTG","raise",2.2],...,["BB","call"]]')
 
 
 class NashRequest(BaseModel):
@@ -84,10 +86,11 @@ class NashRequest(BaseModel):
 
 
 def _to_config(m: PreflopConfigModel) -> GameConfig:
-    if m.game_type not in ("cash", "mtt"):
-        raise ValueError("game_type 必须是 cash 或 mtt")
-    return GameConfig(game_type=m.game_type, stack_bb=m.stack_bb,
-                      sb=m.sb, bb=m.bb, ante=m.ante)
+    try:
+        return GameConfig(game_type=m.game_type, table_size=m.table_size,
+                          stack_bb=m.stack_bb, sb=m.sb, bb=m.bb, ante=m.ante)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 def _parse_sizes(text: str) -> tuple:
@@ -158,6 +161,8 @@ def api_preflop_spot(req: PreflopRequest):
         "stack_bb": spot.stack_bb,
         "pot": spot.pot,
         "stack": spot.stack,
+        "oop_pos": spot.oop_pos,
+        "ip_pos": spot.ip_pos,
         "oop_range": spot.oop_range,
         "ip_range": spot.ip_range,
         "description": spot.description,

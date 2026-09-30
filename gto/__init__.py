@@ -7,7 +7,7 @@
 - equity     蒙特卡洛胜率计算
 - postflop   翻/转/河通用 MCCFR 求解器（机会节点采样）
 - river      河牌求解器（PostflopSolver 的兼容封装）
-- preflop    HU 翻前配置 / 行动线 / 参考范围图表
+- preflop    翻前配置 / 行动线 / 参考范围图表（2/6/9 人桌，翻后 HU）
 - nash       HU 短码全下/弃牌纳什表
 - kuhn       Kuhn 扑克纳什验证（求解器正确性基准）
 """
@@ -18,8 +18,9 @@ from .ranges import parse_range, filter_blocked, all_combos
 from .equity import equity_vs_range, equity_vs_hand, equity_from_strings
 from .postflop import PostflopSolver
 from .river import RiverSolver
-from .preflop import GameConfig, Spot, build_spot, next_actions
+from .preflop import (GameConfig, Spot, build_spot, next_actions,
+                      postflop_order, display_name, POSITIONS)
 from .nash import nash_push_fold, equity_matrix, HANDS, push_call_summary
 from .kuhn import KuhnCFR
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"

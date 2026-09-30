@@ -67,11 +67,15 @@
   .navbtns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .navbtns button { font-size: 12px; padding: 5px 10px; }
   input[type=range] { width: 260px; }
+  .pos { padding: 3px 9px; border-radius: 12px; border: 1px solid var(--border);
+    background: var(--panel2); font-size: 12px; color: var(--muted); }
+  .pos.acting { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .pos.invested { color: var(--text); border-color: #4a5260; }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>GTO Local <span class="ver">v2.0 · HU 单挑 · 本地 MCCFR 求解</span></h1>
+  <h1>GTO Local <span class="ver">v2.1 · 2/6/9 人桌翻前 + HU 翻后 · 本地 MCCFR 求解</span></h1>
   <div class="tabs">
     <div class="tab active" data-mode="regular">常规局求解</div>
     <div class="tab" data-mode="nash">短码 Nash 全下表</div>
@@ -87,9 +91,10 @@
         <span class="chip active" data-gt="cash">Cash</span>
         <span class="chip" data-gt="mtt">MTT</span>
         <label style="margin-left:16px">人数</label>
-        <span class="chip active">HU 单挑</span>
-        <span class="chip disabled" title="多人池后续版本支持">6-max（后续）</span>
-        <span class="chip disabled" title="多人池后续版本支持">9-max（后续）</span>
+        <span class="chip active" data-ts="2">HU 单挑</span>
+        <span class="chip" data-ts="6">6-max</span>
+        <span class="chip" data-ts="9">9-max</span>
+        <span class="muted">（任意桌型翻后都只解 HU，其余玩家需全部弃牌）</span>
       </div>
       <div class="row">
         <label>盲注</label>
@@ -105,8 +110,9 @@
     </div>
 
     <div class="card">
-      <h2>② 翻前行动线 <span class="muted">（BTN 即小盲，翻前先行动；翻后 BTN 有位置）</span></h2>
-      <div class="linecrumb" id="line-crumb"><span class="muted">尚未行动 — BTN(SB) 先行动</span></div>
+      <h2>② 翻前行动线 <span class="muted" id="line-hint">（HU：BTN 即小盲翻前先行动，翻后有位置）</span></h2>
+      <div class="row" id="pos-strip" style="gap:6px"></div>
+      <div class="linecrumb" id="line-crumb"><span class="muted">尚未行动</span></div>
       <div id="line-options"></div>
       <div class="row" style="margin-top:6px">
         <button id="line-undo">撤销一步</button>
@@ -115,11 +121,11 @@
       <div id="spot-summary" class="muted" style="margin-top:8px"></div>
       <div class="row" style="align-items:flex-start">
         <div class="rangebox">
-          <label>OOP（BB）范围 — <span id="oop-size" class="muted"></span></label>
+          <label>OOP（<span id="oop-pos">?</span>，翻后先行动）范围 — <span id="oop-size" class="muted"></span></label>
           <textarea id="oop-range" spellcheck="false"></textarea>
         </div>
         <div class="rangebox">
-          <label>IP（BTN/SB）范围 — <span id="ip-size" class="muted"></span></label>
+          <label>IP（<span id="ip-pos">?</span>，有位置）范围 — <span id="ip-size" class="muted"></span></label>
           <textarea id="ip-range" spellcheck="false"></textarea>
         </div>
       </div>
@@ -248,13 +254,19 @@ function gridLabels() { // 13x13 标准矩阵标签
 }
 
 // ---------- ① 牌桌设置 ----------
-let gameType = "cash", presets = null;
-fetch("/api/preflop/presets").then(r => r.json()).then(p => { presets = p; renderStackChips(); });
+let gameType = "cash", tableSize = 2, presets = null;
+fetch("/api/preflop/presets").then(r => r.json()).then(p => { presets = p; renderStackChips(); renderPosStrip(); });
 document.querySelectorAll("[data-gt]").forEach(ch => ch.onclick = () => {
   document.querySelectorAll("[data-gt]").forEach(x => x.classList.remove("active"));
   ch.classList.add("active"); gameType = ch.dataset.gt;
   if (presets) { $("cfg-stack").value = presets[gameType].default_stack; $("cfg-ante").value = presets[gameType].ante; }
   renderStackChips(); refreshLine();
+});
+document.querySelectorAll("[data-ts]").forEach(ch => ch.onclick = () => {
+  document.querySelectorAll("[data-ts]").forEach(x => x.classList.remove("active"));
+  ch.classList.add("active"); tableSize = Number(ch.dataset.ts);
+  line = [];  // 换桌型清空行动线
+  renderPosStrip(); refreshLine();
 });
 function renderStackChips() {
   const box = $("stack-chips"); box.innerHTML = "";
@@ -267,9 +279,26 @@ function renderStackChips() {
     box.appendChild(c);
   });
 }
+function posName(pos) { return (tableSize === 2 && pos === "SB") ? "BTN(SB)" : pos; }
+function renderPosStrip(acting) {
+  const box = $("pos-strip"); box.innerHTML = "";
+  if (!presets) return;
+  const positions = presets.positions[String(tableSize)] || [];
+  const invested = new Set(line.filter(s => s[1] === "call" || s[1] === "raise").map(s => s[0]));
+  positions.forEach((p, i) => {
+    const c = document.createElement("span");
+    c.className = "pos" + (p === acting ? " acting" : "") + (invested.has(p) ? " invested" : "");
+    c.textContent = posName(p);
+    box.appendChild(c);
+    if (i < positions.length - 1) box.appendChild(Object.assign(document.createElement("span"), {className: "muted", textContent: "→"}));
+  });
+  $("line-hint").textContent = tableSize === 2
+    ? "（HU：BTN 即小盲翻前先行动，翻后有位置）"
+    : `（${tableSize === 6 ? "6-max" : "9-max"}：翻前从 ${positions[0]} 开始行动；翻后只解 HU，其余玩家需弃牌）`;
+}
 ["cfg-sb","cfg-bb","cfg-ante","cfg-stack"].forEach(id => $(id).onchange = refreshLine);
 function getConfig() {
-  return {game_type: gameType, stack_bb: Number($("cfg-stack").value),
+  return {game_type: gameType, table_size: tableSize, stack_bb: Number($("cfg-stack").value),
           sb: Number($("cfg-sb").value), bb: Number($("cfg-bb").value), ante: Number($("cfg-ante").value)};
 }
 
@@ -277,7 +306,7 @@ function getConfig() {
 let line = [];
 function lineLabel(step) {
   const [actor, action, amt] = step;
-  const name = actor === "SB" ? "BTN" : "BB";
+  const name = posName(actor);
   if (action === "raise") return `${name} 加注到 ${amt}bb`;
   return name + {fold:" 弃牌", call:" 跟注", check:" 过牌"}[action];
 }
@@ -285,10 +314,11 @@ async function refreshLine() {
   const crumb = $("line-crumb");
   crumb.innerHTML = line.length
     ? line.map((s,i) => `<span class="crumb"><b>${i+1}</b> ${lineLabel(s)}</span>`).join('<span class="muted">→</span>')
-    : '<span class="muted">尚未行动 — BTN(SB) 先行动</span>';
+    : '<span class="muted">尚未行动</span>';
   try {
     const d = await api("/api/preflop/next", {config: getConfig(), line});
     renderOptions(d.options);
+    renderPosStrip(d.options.length ? d.options[0].actor : null);
     if (line.length) { await refreshSpot(); } else { $("spot-summary").textContent = ""; }
   } catch(e) { $("spot-summary").textContent = e.message; }
 }
@@ -297,8 +327,10 @@ function renderOptions(options) {
   options.forEach(o => {
     const b = document.createElement("button");
     b.className = "optbtn";
-    b.textContent = (o.actor === "SB" ? "BTN " : "BB ") + o.label;
+    b.textContent = posName(o.actor) + " " + o.label;
     if (o.amounts) {
+      b.disabled = true;
+      box.appendChild(b);
       o.amounts.forEach(a => {
         const ab = document.createElement("button");
         ab.className = "optbtn amt";
@@ -319,9 +351,11 @@ async function refreshSpot() {
       $("spot-summary").textContent = "⚠ " + s.reason + "（行动线翻前已结束，无法进入翻后求解）";
       return;
     }
-    $("spot-summary").innerHTML = `📋 ${s.description} · OOP=<b>BB</b> IP=<b>BTN</b> · 求解筹码：pot=${s.pot} stack=${s.stack}`;
+    $("spot-summary").innerHTML = `📋 ${s.description} · 求解筹码：pot=${s.pot} stack=${s.stack}`;
     $("oop-range").value = s.oop_range;
     $("ip-range").value = s.ip_range;
+    $("oop-pos").textContent = posName(s.oop_pos);
+    $("ip-pos").textContent = posName(s.ip_pos);
     updateRangeSizes();
   } catch(e) { $("spot-summary").textContent = e.message; }
 }

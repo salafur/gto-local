@@ -127,3 +127,143 @@ class TestNextActions:
         opts = next_actions(cfg, [("SB", "call", None)])
         actions = {(o["actor"], o["action"]) for o in opts}
         assert actions == {("BB", "check"), ("BB", "raise")}
+
+
+# ===========================================================================
+# 6max / 9max：多位置桌型（翻后仍为 HU）
+# ===========================================================================
+
+from gto.preflop import (BB_DEFEND_VS_EARLY, CALL_VS_3BET, FLAT_VS_RFI,
+                         GENERIC_LIMP, RFI_BTN, RFI_UTG, THREEBET_STD,
+                         THREEBET_VS_EARLY, postflop_order)
+
+
+class TestTableSizes:
+    def test_positions(self):
+        assert GameConfig(table_size=2).positions == ("SB", "BB")
+        assert GameConfig(table_size=6).positions == ("UTG", "HJ", "CO", "BTN", "SB", "BB")
+        assert len(GameConfig(table_size=9).positions) == 9
+
+    def test_invalid_table_size(self):
+        with pytest.raises(ValueError):
+            GameConfig(table_size=5)
+
+    def test_postflop_order_hu(self):
+        # HU：BTN=SB，翻后 BB 先行动
+        assert postflop_order(GameConfig(table_size=2)) == ("BB", "SB")
+
+    def test_postflop_order_6max(self):
+        assert postflop_order(GameConfig(table_size=6)) == ("SB", "BB", "UTG", "HJ", "CO", "BTN")
+
+
+class TestSixMaxSpots:
+    def test_utg_open_btn_call(self):
+        cfg = GameConfig(table_size=6, stack_bb=100)
+        line = [("UTG", "raise", 2.2), ("HJ", "fold"), ("CO", "fold"),
+                ("BTN", "call"), ("SB", "fold"), ("BB", "fold")]
+        spot = build_spot(cfg, line)
+        assert not spot.ended
+        # 底池 = 2.2*2 + 0.5(SB) + 1(BB)
+        assert spot.pot_bb == pytest.approx(5.9)
+        assert spot.stack_bb == pytest.approx(97.8)
+        assert spot.oop_pos == "UTG" and spot.ip_pos == "BTN"
+        assert spot.oop_range == RFI_UTG
+        assert spot.ip_range == FLAT_VS_RFI
+
+    def test_btn_open_bb_call(self):
+        cfg = GameConfig(table_size=6, stack_bb=100)
+        line = [("UTG", "fold"), ("HJ", "fold"), ("CO", "fold"),
+                ("BTN", "raise", 2.5), ("SB", "fold"), ("BB", "call")]
+        spot = build_spot(cfg, line)
+        assert not spot.ended
+        assert spot.pot_bb == pytest.approx(5.5)
+        assert spot.oop_pos == "BB" and spot.ip_pos == "BTN"
+        assert spot.ip_range == RFI_BTN
+        assert spot.oop_range == BB_CALL_VS_RAISE  # vs 后位宽防守
+
+    def test_early_open_bb_defends_tighter(self):
+        cfg = GameConfig(table_size=6, stack_bb=100)
+        line = [("UTG", "raise", 2.2), ("HJ", "fold"), ("CO", "fold"),
+                ("BTN", "fold"), ("SB", "fold"), ("BB", "call")]
+        spot = build_spot(cfg, line)
+        assert spot.oop_range == BB_DEFEND_VS_EARLY
+
+    def test_3bet_pot_wraparound(self):
+        # UTG 开池，BB 3bet，行动绕回 UTG 跟注
+        cfg = GameConfig(table_size=6, stack_bb=100)
+        line = [("UTG", "raise", 2.2), ("HJ", "fold"), ("CO", "fold"),
+                ("BTN", "fold"), ("SB", "fold"), ("BB", "raise", 9.0),
+                ("UTG", "call")]
+        spot = build_spot(cfg, line)
+        assert not spot.ended
+        assert spot.pot_bb == pytest.approx(9 + 9 + 0.5)
+        assert spot.oop_pos == "BB" and spot.ip_pos == "UTG"
+        assert spot.oop_range == THREEBET_VS_EARLY  # BB vs UTG 紧 3bet
+        assert spot.ip_range == CALL_VS_3BET
+
+    def test_co_open_btn_3bet(self):
+        cfg = GameConfig(table_size=6, stack_bb=100)
+        line = [("UTG", "fold"), ("HJ", "fold"), ("CO", "raise", 2.5),
+                ("BTN", "raise", 8.0), ("SB", "fold"), ("BB", "fold"),
+                ("CO", "call")]
+        spot = build_spot(cfg, line)
+        assert spot.oop_pos == "CO" and spot.ip_pos == "BTN"
+        assert spot.ip_range == THREEBET_STD
+
+    def test_ante_all_players_in_pot(self):
+        cfg = GameConfig(game_type="mtt", table_size=6, stack_bb=20, ante=0.1)
+        line = [("UTG", "fold"), ("HJ", "fold"), ("CO", "fold"),
+                ("BTN", "raise", 2.0), ("SB", "fold"), ("BB", "call")]
+        spot = build_spot(cfg, line)
+        # 底池 = 2+2+0.5 + 0.1*6
+        assert spot.pot_bb == pytest.approx(5.1)
+        assert spot.stack_bb == pytest.approx(17.9)
+
+
+class TestMultiwayBlocking:
+    def test_third_entrant_only_fold(self):
+        cfg = GameConfig(table_size=6, stack_bb=100)
+        line = [("UTG", "raise", 2.2), ("HJ", "call")]
+        opts = next_actions(cfg, line)
+        assert [(o["actor"], o["action"]) for o in opts] == [("CO", "fold")]
+
+    def test_build_spot_rejects_multiway(self):
+        cfg = GameConfig(table_size=6, stack_bb=100)
+        # 构造三人都在的线：UTG limp, HJ limp, 其余弃牌到 BB —— BB 只能 fold
+        line = [("UTG", "call"), ("HJ", "call"), ("CO", "fold"),
+                ("BTN", "fold"), ("SB", "fold")]
+        opts = next_actions(cfg, line)
+        # BB 过牌会造成 3 人池，所以只给 fold
+        assert [(o["actor"], o["action"]) for o in opts] == [("BB", "fold")]
+        line.append(("BB", "fold"))
+        spot = build_spot(cfg, line)  # 剩下 UTG vs HJ 的 HU limp 池
+        assert not spot.ended
+        assert spot.oop_pos == "UTG" and spot.ip_pos == "HJ"
+        assert spot.oop_range == GENERIC_LIMP and spot.ip_range == GENERIC_LIMP
+
+    def test_out_of_turn_rejected(self):
+        cfg = GameConfig(table_size=6, stack_bb=100)
+        with pytest.raises(ValueError, match="行动顺序错误"):
+            build_spot(cfg, [("CO", "raise", 2.5)])  # UTG 必须先行动
+
+    def test_line_incomplete_rejected(self):
+        cfg = GameConfig(table_size=6, stack_bb=100)
+        with pytest.raises(ValueError, match="尚未结束"):
+            build_spot(cfg, [("UTG", "raise", 2.2), ("HJ", "fold")])
+
+
+class TestNineMax:
+    def test_full_ring_srp(self):
+        cfg = GameConfig(table_size=9, stack_bb=100)
+        line = [("UTG", "fold"), ("UTG+1", "fold"), ("MP", "raise", 2.5),
+                ("LJ", "fold"), ("HJ", "fold"), ("CO", "call"),
+                ("BTN", "fold"), ("SB", "fold"), ("BB", "fold")]
+        spot = build_spot(cfg, line)
+        assert not spot.ended
+        assert spot.oop_pos == "MP" and spot.ip_pos == "CO"
+        assert spot.pot_bb == pytest.approx(2.5 * 2 + 1.5)
+
+    def test_opening_actor_is_utg(self):
+        opts = next_actions(GameConfig(table_size=9, stack_bb=100), [])
+        actors = {o["actor"] for o in opts}
+        assert actors == {"UTG"}
